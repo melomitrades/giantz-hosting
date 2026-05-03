@@ -1,10 +1,10 @@
 {
-  "name": "group-orders",
+  "name": "giantz-hosting",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",
@@ -25,4 +25,5 @@
     "tsx": "^4.15.0",
     "typescript": "^5"
   }
+}
 }
