@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id    String @id
+  name  String
+  role  String
+  email String @default("")
+}
+
+model KnownGroup {
+  id      String        @id
+  name    String
+  members KnownMember[]
+}
+
+model KnownMember {
+  id        String     @id
+  name      String
+  stageName String?
+  groupId   String
+  group     KnownGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+}
+
+model WeightCategory {
+  id     String @id
+  name   String
+  points Int
+}
+
+model Shop {
+  id                                   String  @id
+  name                                 String
+  acceptsEnglishWebsiteShippingToKorea Boolean @default(false)
+  acceptsIdOrPassport                  Boolean @default(false)
+  url                                  String?
+  notes                                String?
+}
+
+model ShopOrder {
+  id                String  @id
+  group             String
+  shop              String
+  round             String?
+  isFancall         Boolean @default(false)
+  fulfillmentStatus String  @default("ordered")
+  dateOfOrder       String
+  shopDeadline      String?
+  notes             String?
+  pricingOptions    String  @default("[]")
+  joiners           String  @default("[]")
+}
+
+model Fancall {
+  id                  String  @id
+  shop                String
+  resultPage          String?
+  dateTime            String
+  enteredByJoinerId   String
+  enteredByJoinerName String
+  won                 Boolean @default(false)
+  received            Boolean @default(false)
+  benefitsToKaddy     String?
+  shopOrderId         String?
+}
+
+model ShippingPackage {
+  id               String  @id
+  joinerId         String
+  joinerName       String
+  courier          String
+  address          String  @default("")
+  shippingStatus   String  @default("unpacked")
+  weightType       String  @default("package")
+  weightKg         Float?
+  shippingDeadline String?
+  miscNotes        String?
+  shopOrderIds     String  @default("[]")
+}
+
+model PaymentRecord {
+  id                         String  @id
+  recipientType              String
+  recipientName              String
+  amountSentSenderCurrency   Float
+  senderCurrency             String
+  amountSentReceiverCurrency Float
+  receiverCurrency           String
+  paymentMethod              String
+  shopOrderId                String?
+  paidAt                     String
+  coveringLog                String?
+}
+
+model AddyItem {
+  id           String  @id
+  country      String
+  joinerId     String?
+  shopOrderId  String?
+  arrivedItems String
+  pictureUrl   String?
+  arrivedAt    String
+}
+
+model AddyAddresses {
+  id    String @id @default("singleton")
+  korea String @default("")
+  china String @default("")
+  japan String @default("")
+  other String @default("")
+}
+
+model Box {
+  id             String  @id
+  name           String
+  emsCostEur     Float   @default(0)
+  emsCostKrw     Float   @default(0)
+  customsCostEur Float   @default(0)
+  customsCostKrw Float   @default(0)
+  exchangeRate   Float   @default(1480)
+  sentAt         String?
+  notes          String?
+  shopOrderIds   String  @default("[]")
+  joinerFees     String  @default("[]")
+}
+
+model SortingSession {
+  id          String  @id
+  group       String
+  notes       String?
+  sortedAt    String?
+  sortMethod  String?
+  versions    String  @default("[]")
+  memberSlots String  @default("[]")
+  joiners     String  @default("[]")
+}
+
+model Notification {
+  id             String  @id
+  type           String
+  message        String
+  relatedOrderId String?
+  forRole        String
+  createdAt      String
+  read           Boolean @default(false)
+}
