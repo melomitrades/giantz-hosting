@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { ok } from "../_helpers";
 import { NextRequest } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const row = await prisma.addyAddresses.findUnique({ where: { id: "singleton" } });
   return ok(row ?? { id: "singleton", korea: "", china: "", japan: "", other: "" });

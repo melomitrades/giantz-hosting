@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
 import { ok } from "../_helpers";
 import { NextRequest } from "next/server";
 
