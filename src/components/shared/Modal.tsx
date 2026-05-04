@@ -10,11 +10,16 @@ interface ModalProps {
 }
 
 export default function Modal({ title, onClose, children, width = 560 }: ModalProps) {
-  // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    // Lock body scroll while modal is open so page doesn't scroll behind it
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handler);
+      document.body.style.overflow = prev;
+    };
   }, [onClose]);
 
   return (
@@ -23,12 +28,11 @@ export default function Modal({ title, onClose, children, width = 560 }: ModalPr
       style={{
         position: "fixed", inset: 0, zIndex: 1000,
         background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
-        overflowY: "auto",           // backdrop scrolls, not the inner box
-        padding: "2rem 1rem",        // breathing room top & bottom
+        overflowY: "auto",
+        padding: "2rem 1rem",
+        minHeight: "100vh",
       }}
     >
-      {/* Centering wrapper — uses margin auto so short modals stay centered,
-          tall ones just start near the top and scroll naturally */}
       <div
         onClick={(e) => e.stopPropagation()}
         className="fade-in"
@@ -38,7 +42,7 @@ export default function Modal({ title, onClose, children, width = 560 }: ModalPr
           borderRadius: "var(--radius-lg)",
           boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
           width: "100%", maxWidth: width,
-          margin: "0 auto",          // horizontally centered; no vertical centering
+          margin: "0 auto",
           padding: "1.75rem",
         }}
       >
@@ -62,16 +66,9 @@ export default function Modal({ title, onClose, children, width = 560 }: ModalPr
   );
 }
 
-// ── Reusable form row helpers ────────────────────────────────────────────────
-
 export function FormRow({ children, cols = 1 }: { children: ReactNode; cols?: number }) {
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: `repeat(${cols}, 1fr)`,
-      gap: "1rem",
-      marginBottom: "1rem",
-    }}>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: "1rem", marginBottom: "1rem" }}>
       {children}
     </div>
   );

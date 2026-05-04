@@ -60,6 +60,7 @@ export const MOCK_KNOWN_GROUPS: KnownGroup[] = [
 export const MOCK_SHOP_ORDERS: ShopOrder[] = [
   {
     id: "so1",
+    orderType: "group" as const,
     group: "SEVENTEEN",
     shop: "Weverse Shop",
     dateOfOrder: "2025-03-01T10:00:00Z",
@@ -93,6 +94,7 @@ export const MOCK_SHOP_ORDERS: ShopOrder[] = [
   },
   {
     id: "so2",
+    orderType: "group" as const,
     group: "aespa",
     shop: "SM Store",
     dateOfOrder: "2025-03-05T14:00:00Z",

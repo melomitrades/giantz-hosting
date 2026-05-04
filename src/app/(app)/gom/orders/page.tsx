@@ -5,18 +5,24 @@ import { useApp } from "@/context/AppContext";
 import { formatDate, formatEur, generateId } from "@/lib/utils";
 import {
   ShopOrder, JoinerEntry, ClaimedItem, MemberClaim, KnownGroup, KnownMember,
-  OrderFulfillmentStatus, JoinerPaymentStatus, PricingOption,
+  OrderFulfillmentStatus, JoinerPaymentStatus, PricingOption, OrderType,
 } from "@/types";
 import Modal, { FormRow, FormField, FormActions } from "@/components/shared/Modal";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const FULFILLMENT_COLOR: Record<string, string> = {
-  ordered: "var(--status-ordered)", received_at_kaddy: "var(--status-kaddy)",
-  otw_to_gom: "var(--status-otw)", arrived_to_gom: "var(--status-arrived)",
+  to_order: "var(--accent-lavender)",
+  ordered: "var(--status-ordered)",
+  received_at_kaddy: "var(--status-kaddy)",
+  otw_to_gom: "var(--status-otw)",
+  arrived_to_gom: "var(--status-arrived)",
 };
 const FULFILLMENT_LABELS: Record<string, string> = {
-  ordered: "Ordered", received_at_kaddy: "At Kaddy",
-  otw_to_gom: "OTW to GOM", arrived_to_gom: "At GOM",
+  to_order: "To Order",
+  ordered: "Ordered",
+  received_at_kaddy: "At Kaddy",
+  otw_to_gom: "OTW to GOM",
+  arrived_to_gom: "At GOM",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -27,10 +33,7 @@ function emptyPricingOption(weightCategoryId: string): PricingOption {
 function emptyItem(pricingOptions: PricingOption[]): ClaimedItem {
   const first = pricingOptions[0];
   return {
-    id: generateId("ci"),
-    name: "",
-    quantity: 1,
-    membersClaimed: [],
+    id: generateId("ci"), name: "", quantity: 1, membersClaimed: [],
     pricingOptionId: first?.id ?? "custom",
     pricePerUnit: first?.priceEur ?? 0,
     weightCategoryId: first?.weightCategoryId ?? "",
@@ -38,15 +41,23 @@ function emptyItem(pricingOptions: PricingOption[]): ClaimedItem {
   };
 }
 
+function emptyPersonalItem(): ClaimedItem {
+  return {
+    id: generateId("ci"), name: "", quantity: 1, membersClaimed: [],
+    pricingOptionId: "custom", pricePerUnit: 0, weightCategoryId: "", inclusions: "",
+  };
+}
+
 function emptyJoiner(joinerId: string, joinerName: string): JoinerEntry {
   return { id: generateId("je"), joinerId, joinerName, items: [], paymentStatus: "unpaid" };
 }
 
-function emptyOrder(): ShopOrder {
+function emptyOrder(type: OrderType): ShopOrder {
   return {
     id: generateId("so"), group: "", shop: "",
     dateOfOrder: new Date().toISOString().slice(0, 10),
-    fulfillmentStatus: "ordered", pricingOptions: [], joiners: [],
+    fulfillmentStatus: "to_order",
+    orderType: type, pricingOptions: [], joiners: [],
   };
 }
 
@@ -102,10 +113,8 @@ function GroupManagerModal({ initial, isNew, onClose }: { initial: KnownGroup; i
 function PricingOptionsEditor({ options, onChange }: { options: PricingOption[]; onChange: (o: PricingOption[]) => void }) {
   const { weightCategories } = useApp();
   const defaultWcId = weightCategories.find((w) => w.name.toLowerCase() === "pc")?.id ?? weightCategories[0]?.id ?? "";
-
   const upd = (id: string, f: keyof PricingOption, v: unknown) =>
     onChange(options.map((o) => o.id === id ? { ...o, [f]: v } : o));
-
   return (
     <div style={{ marginTop: "0.5rem" }}>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 100px 1fr 22px", gap: 6, marginBottom: 4 }}>
@@ -128,48 +137,31 @@ function PricingOptionsEditor({ options, onChange }: { options: PricingOption[];
         style={{ background: "none", border: "none", color: "var(--accent-blossom)", cursor: "pointer", fontSize: "0.78rem", marginTop: 2 }}>
         + Add pricing option
       </button>
-      {options.length === 0 && (
-        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
-          No options yet — add at least one before logging items.
-        </div>
-      )}
+      {options.length === 0 && <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>No options yet — add at least one before logging items.</div>}
     </div>
   );
 }
 
-// ── Item row ──────────────────────────────────────────────────────────────────
+// ── Item row (group order) ────────────────────────────────────────────────────
 function ItemRow({ item, pricingOptions, groupMembers, onChange, onRemove }: {
-  item: ClaimedItem;
-  pricingOptions: PricingOption[];
-  groupMembers: KnownMember[];
-  onChange: (updated: ClaimedItem) => void;  // whole item, not field-by-field
-  onRemove: () => void;
+  item: ClaimedItem; pricingOptions: PricingOption[]; groupMembers: KnownMember[];
+  onChange: (updated: ClaimedItem) => void; onRemove: () => void;
 }) {
   const { weightCategories } = useApp();
   const isCustom = item.pricingOptionId === "custom";
 
-  // Pricing option dropdown — update pricingOptionId + price + weightCat atomically
   const handleOptionChange = (optId: string) => {
-    if (optId === "custom") {
-      onChange({ ...item, pricingOptionId: "custom" });
-      return;
-    }
+    if (optId === "custom") { onChange({ ...item, pricingOptionId: "custom" }); return; }
     const opt = pricingOptions.find((o) => o.id === optId);
-    if (opt) {
-      onChange({ ...item, pricingOptionId: optId, pricePerUnit: opt.priceEur, weightCategoryId: opt.weightCategoryId });
-    }
+    if (opt) onChange({ ...item, pricingOptionId: optId, pricePerUnit: opt.priceEur, weightCategoryId: opt.weightCategoryId });
   };
 
-  // Toggle a known member — update membersClaimed + quantity atomically
   const toggleMember = (m: KnownMember) => {
     const already = item.membersClaimed.some((mc) => mc.memberId === m.id);
-    const next: MemberClaim[] = already
-      ? item.membersClaimed.filter((mc) => mc.memberId !== m.id)
-      : [...item.membersClaimed, { memberId: m.id, memberName: m.name }];
+    const next: MemberClaim[] = already ? item.membersClaimed.filter((mc) => mc.memberId !== m.id) : [...item.membersClaimed, { memberId: m.id, memberName: m.name }];
     onChange({ ...item, membersClaimed: next, quantity: next.length > 0 ? next.length : item.quantity });
   };
 
-  // Add a custom (non-roster) member atomically
   const addCustomMember = () => {
     const name = prompt("Member name:");
     if (!name?.trim()) return;
@@ -184,100 +176,60 @@ function ItemRow({ item, pricingOptions, groupMembers, onChange, onRemove }: {
 
   return (
     <div style={{ background: "var(--bg)", borderRadius: "var(--radius-sm)", padding: "0.75rem", marginBottom: "0.5rem", border: "1px solid var(--border-subtle)" }}>
-
-      {/* Row 1: Members picker */}
       <div style={{ marginBottom: "0.625rem" }}>
         <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 5 }}>Members for this item</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-          {/* Known member pills */}
           {groupMembers.map((m) => {
             const sel = item.membersClaimed.some((mc) => mc.memberId === m.id);
             return (
               <button key={m.id} type="button" onClick={() => toggleMember(m)}
-                style={{
-                  padding: "3px 10px", borderRadius: 99, fontSize: "0.75rem", cursor: "pointer",
-                  border: "1px solid", transition: "all 0.12s",
-                  background: sel ? "var(--accent-blossom)" : "transparent",
-                  color: sel ? "#0d0f14" : "var(--text-muted)",
-                  borderColor: sel ? "var(--accent-blossom)" : "var(--border)",
-                }}>
+                style={{ padding: "3px 10px", borderRadius: 99, fontSize: "0.75rem", cursor: "pointer", border: "1px solid", transition: "all 0.12s",
+                  background: sel ? "var(--accent-blossom)" : "transparent", color: sel ? "#0d0f14" : "var(--text-muted)", borderColor: sel ? "var(--accent-blossom)" : "var(--border)" }}>
                 {m.name}
               </button>
             );
           })}
-          {/* Custom members already added (not from group roster) */}
-          {item.membersClaimed
-            .filter((mc) => !groupMembers.some((m) => m.id === mc.memberId))
-            .map((mc) => (
-              <span key={mc.memberId} style={{ display: "flex", alignItems: "center", gap: 3, padding: "3px 10px", borderRadius: 99, fontSize: "0.75rem", background: "var(--accent-blossom)", color: "#0d0f14" }}>
-                {mc.memberName}
-                <button type="button" onClick={() => removeMember(mc.memberId)}
-                  style={{ background: "none", border: "none", color: "#0d0f14", cursor: "pointer", fontSize: "0.65rem", lineHeight: 1 }}>✕</button>
-              </span>
-            ))}
+          {item.membersClaimed.filter((mc) => !groupMembers.some((m) => m.id === mc.memberId)).map((mc) => (
+            <span key={mc.memberId} style={{ display: "flex", alignItems: "center", gap: 3, padding: "3px 10px", borderRadius: 99, fontSize: "0.75rem", background: "var(--accent-blossom)", color: "#0d0f14" }}>
+              {mc.memberName}
+              <button type="button" onClick={() => removeMember(mc.memberId)} style={{ background: "none", border: "none", color: "#0d0f14", cursor: "pointer", fontSize: "0.65rem", lineHeight: 1 }}>✕</button>
+            </span>
+          ))}
           <button type="button" onClick={addCustomMember}
             style={{ padding: "3px 10px", borderRadius: 99, fontSize: "0.75rem", cursor: "pointer", border: "1px dashed var(--border)", background: "transparent", color: "var(--text-muted)" }}>
             + {groupMembers.length > 0 ? "Custom" : "Add member"}
           </button>
         </div>
-        {/* Member count feedback */}
-        {item.membersClaimed.length > 0 && (
-          <div style={{ fontSize: "0.68rem", color: "var(--accent-blossom)", marginTop: 4 }}>
-            {item.membersClaimed.length} member{item.membersClaimed.length !== 1 ? "s" : ""} → qty auto-set to {item.membersClaimed.length}
-          </div>
-        )}
+        {item.membersClaimed.length > 0 && <div style={{ fontSize: "0.68rem", color: "var(--accent-blossom)", marginTop: 4 }}>{item.membersClaimed.length} member{item.membersClaimed.length !== 1 ? "s" : ""} → qty {item.membersClaimed.length}</div>}
       </div>
-
-      {/* Row 2: pricing dropdown + optional description + qty + inclusions + remove */}
       <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 60px 1fr 22px", gap: 6, alignItems: "flex-end" }}>
-
-        {/* Pricing dropdown */}
         <div>
           <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Pricing option</div>
-          <select
-            value={item.pricingOptionId}
-            onChange={(e) => handleOptionChange(e.target.value)}
-            style={{ color: isCustom ? "var(--accent-gold)" : "var(--accent-blossom)" }}>
-            {pricingOptions.map((opt) => (
-              <option key={opt.id} value={opt.id}>{opt.label} — €{opt.priceEur.toFixed(2)}</option>
-            ))}
+          <select value={item.pricingOptionId} onChange={(e) => handleOptionChange(e.target.value)} style={{ color: isCustom ? "var(--accent-gold)" : "var(--accent-blossom)" }}>
+            {pricingOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.label} — €{opt.priceEur.toFixed(2)}</option>)}
             <option value="custom">Custom price</option>
           </select>
         </div>
-
-        {/* Optional description */}
         <div>
           <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Description <span style={{ opacity: 0.5 }}>(optional)</span></div>
           <input placeholder="e.g. ver.A, signed…" value={item.name ?? ""} onChange={(e) => onChange({ ...item, name: e.target.value })} />
         </div>
-
-        {/* Quantity — editable but auto-set by member count */}
         <div>
           <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Qty</div>
-          <input type="number" min={1} value={item.quantity}
-            onChange={(e) => onChange({ ...item, quantity: Number(e.target.value) })}
-            style={{ textAlign: "center" }} />
+          <input type="number" min={1} value={item.quantity} onChange={(e) => onChange({ ...item, quantity: Number(e.target.value) })} style={{ textAlign: "center" }} />
         </div>
-
-        {/* Inclusions */}
         <div>
           <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Inclusions</div>
           <input placeholder="e.g. Random PC ×1" value={item.inclusions} onChange={(e) => onChange({ ...item, inclusions: e.target.value })} />
         </div>
-
-        {/* Remove button */}
-        <button type="button" onClick={onRemove}
-          style={{ background: "none", border: "none", color: "var(--status-unpaid)", cursor: "pointer", fontSize: "0.9rem", paddingBottom: 6 }}>✕</button>
+        <button type="button" onClick={onRemove} style={{ background: "none", border: "none", color: "var(--status-unpaid)", cursor: "pointer", fontSize: "0.9rem", paddingBottom: 6 }}>✕</button>
       </div>
-
-      {/* Row 3: Price display + custom price/weight inputs */}
       <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginTop: "0.5rem" }}>
         {isCustom ? (
           <>
             <div style={{ minWidth: 110 }}>
               <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Custom price (€)</div>
-              <input type="number" min={0} step={0.01} value={item.pricePerUnit}
-                onChange={(e) => onChange({ ...item, pricePerUnit: Number(e.target.value) })} />
+              <input type="number" min={0} step={0.01} value={item.pricePerUnit} onChange={(e) => onChange({ ...item, pricePerUnit: Number(e.target.value) })} />
             </div>
             <div style={{ minWidth: 130 }}>
               <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Weight category</div>
@@ -289,17 +241,13 @@ function ItemRow({ item, pricingOptions, groupMembers, onChange, onRemove }: {
         ) : (
           <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
             <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-              <span style={{ color: "var(--accent-gold)", fontFamily: "'DM Mono', monospace" }}>€{item.pricePerUnit.toFixed(2)}</span>
-              {" "}/ unit
+              <span style={{ color: "var(--accent-gold)", fontFamily: "'DM Mono', monospace" }}>€{item.pricePerUnit.toFixed(2)}</span> / unit
             </div>
             <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-              Weight: <span style={{ color: "var(--text-secondary)" }}>
-                {weightCategories.find((w) => w.id === item.weightCategoryId)?.name ?? "?"} ({weightCategories.find((w) => w.id === item.weightCategoryId)?.points ?? "?"}pt)
-              </span>
+              Weight: <span style={{ color: "var(--text-secondary)" }}>{weightCategories.find((w) => w.id === item.weightCategoryId)?.name ?? "?"} ({weightCategories.find((w) => w.id === item.weightCategoryId)?.points ?? "?"}pt)</span>
             </div>
           </div>
         )}
-        {/* Line total */}
         <div style={{ marginLeft: "auto", fontFamily: "'DM Mono', monospace", color: "var(--accent-mint)", fontSize: "0.875rem", fontWeight: 600 }}>
           = €{(item.pricePerUnit * item.quantity).toFixed(2)}
         </div>
@@ -308,13 +256,28 @@ function ItemRow({ item, pricingOptions, groupMembers, onChange, onRemove }: {
   );
 }
 
-// ── Joiner section ────────────────────────────────────────────────────────────
+// ── Simple item row (personal order — no pricing options, no members) ──────────
+function PersonalItemRow({ item, onChange, onRemove }: {
+  item: ClaimedItem; onChange: (updated: ClaimedItem) => void; onRemove: () => void;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "2fr 80px 100px 1fr 22px", gap: 6, marginBottom: 6, alignItems: "center" }}>
+      <input placeholder="Item name" value={item.name ?? ""} onChange={(e) => onChange({ ...item, name: e.target.value })} />
+      <input type="number" min={1} value={item.quantity} onChange={(e) => onChange({ ...item, quantity: Number(e.target.value) })} style={{ textAlign: "center" }} />
+      <div style={{ position: "relative" }}>
+        <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontSize: "0.85rem" }}>€</span>
+        <input type="number" min={0} step={0.01} value={item.pricePerUnit} onChange={(e) => onChange({ ...item, pricePerUnit: Number(e.target.value) })} style={{ paddingLeft: 22 }} />
+      </div>
+      <input placeholder="Inclusions / notes" value={item.inclusions} onChange={(e) => onChange({ ...item, inclusions: e.target.value })} />
+      <button type="button" onClick={onRemove} style={{ background: "none", border: "none", color: "var(--status-unpaid)", cursor: "pointer", fontSize: "0.9rem" }}>✕</button>
+    </div>
+  );
+}
+
+// ── Group joiner section ──────────────────────────────────────────────────────
 function JoinerSection({ entry, pricingOptions, groupName, onChange, onRemove }: {
-  entry: JoinerEntry;
-  pricingOptions: PricingOption[];
-  groupName: string;
-  onChange: (u: JoinerEntry) => void;
-  onRemove: () => void;
+  entry: JoinerEntry; pricingOptions: PricingOption[]; groupName: string;
+  onChange: (u: JoinerEntry) => void; onRemove: () => void;
 }) {
   const { users, knownGroups } = useApp();
   const joiners = users.filter((u) => u.role === "joiner");
@@ -322,13 +285,11 @@ function JoinerSection({ entry, pricingOptions, groupName, onChange, onRemove }:
 
   const updateItem = (idx: number, updated: ClaimedItem) =>
     onChange({ ...entry, items: entry.items.map((it, i) => i === idx ? updated : it) });
-
   const addItem = () => onChange({ ...entry, items: [...entry.items, emptyItem(pricingOptions)] });
   const removeItem = (idx: number) => onChange({ ...entry, items: entry.items.filter((_, i) => i !== idx) });
 
   return (
     <div style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius-md)", padding: "0.875rem", marginBottom: "0.625rem", border: "1px solid var(--border)" }}>
-      {/* Joiner meta row */}
       <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginBottom: "0.875rem" }}>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Joiner</label>
@@ -339,54 +300,81 @@ function JoinerSection({ entry, pricingOptions, groupName, onChange, onRemove }:
         </div>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Payment</label>
-          <select value={entry.paymentStatus} style={{ marginTop: 2 }}
-            onChange={(e) => onChange({ ...entry, paymentStatus: e.target.value as JoinerPaymentStatus })}>
-            <option value="unpaid">Unpaid</option>
-            <option value="paid">Paid</option>
+          <select value={entry.paymentStatus} style={{ marginTop: 2 }} onChange={(e) => onChange({ ...entry, paymentStatus: e.target.value as JoinerPaymentStatus })}>
+            <option value="unpaid">Unpaid</option><option value="paid">Paid</option>
           </select>
         </div>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Deadline</label>
-          <input type="date" style={{ marginTop: 2 }} value={entry.deadline?.slice(0, 10) ?? ""}
-            onChange={(e) => onChange({ ...entry, deadline: e.target.value || undefined })} />
+          <input type="date" style={{ marginTop: 2 }} value={entry.deadline?.slice(0, 10) ?? ""} onChange={(e) => onChange({ ...entry, deadline: e.target.value || undefined })} />
         </div>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Proof URL</label>
-          <input style={{ marginTop: 2 }} value={entry.paymentProofUrl ?? ""} placeholder="https://..."
-            onChange={(e) => onChange({ ...entry, paymentProofUrl: e.target.value || undefined })} />
+          <input style={{ marginTop: 2 }} value={entry.paymentProofUrl ?? ""} placeholder="https://..." onChange={(e) => onChange({ ...entry, paymentProofUrl: e.target.value || undefined })} />
         </div>
-        <button type="button" onClick={onRemove}
-          style={{ background: "none", border: "none", color: "var(--status-unpaid)", cursor: "pointer", fontSize: "1.1rem", flexShrink: 0 }}>✕</button>
+        <button type="button" onClick={onRemove} style={{ background: "none", border: "none", color: "var(--status-unpaid)", cursor: "pointer", fontSize: "1.1rem", flexShrink: 0 }}>✕</button>
       </div>
-
-      {/* Items */}
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Items — {entry.items.length} line{entry.items.length !== 1 ? "s" : ""}
-          </label>
-          <button type="button" onClick={addItem}
-            style={{ background: "none", border: "none", color: "var(--accent-blossom)", cursor: "pointer", fontSize: "0.75rem" }}>
-            + Add item
-          </button>
+          <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Items — {entry.items.length} line{entry.items.length !== 1 ? "s" : ""}</label>
+          <button type="button" onClick={addItem} style={{ background: "none", border: "none", color: "var(--accent-blossom)", cursor: "pointer", fontSize: "0.75rem" }}>+ Add item</button>
         </div>
-
-        {pricingOptions.length === 0 && (
-          <div style={{ fontSize: "0.75rem", color: "var(--accent-gold)", padding: "6px 0" }}>
-            ⚠️ Define pricing options at the top before adding items
-          </div>
-        )}
-
+        {pricingOptions.length === 0 && <div style={{ fontSize: "0.75rem", color: "var(--accent-gold)", padding: "6px 0" }}>⚠️ Define pricing options above first</div>}
         {entry.items.map((item, idx) => (
           <ItemRow key={item.id} item={item} pricingOptions={pricingOptions} groupMembers={groupMembers}
-            onChange={(updated) => updateItem(idx, updated)}
-            onRemove={() => removeItem(idx)} />
+            onChange={(updated) => updateItem(idx, updated)} onRemove={() => removeItem(idx)} />
         ))}
-
-        {entry.items.length === 0 && pricingOptions.length > 0 && (
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", padding: "6px 0" }}>No items yet</div>
-        )}
+        {entry.items.length === 0 && pricingOptions.length > 0 && <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>No items yet</div>}
       </div>
+    </div>
+  );
+}
+
+// ── Personal joiner section (one joiner, simple items) ────────────────────────
+function PersonalJoinerSection({ entry, onChange }: { entry: JoinerEntry; onChange: (u: JoinerEntry) => void }) {
+  const { users } = useApp();
+  const joiners = users.filter((u) => u.role === "joiner");
+  const updateItem = (idx: number, updated: ClaimedItem) =>
+    onChange({ ...entry, items: entry.items.map((it, i) => i === idx ? updated : it) });
+
+  return (
+    <div style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius-md)", padding: "0.875rem", border: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginBottom: "1rem" }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Joiner</label>
+          <select value={entry.joinerId} style={{ marginTop: 2 }}
+            onChange={(e) => { const j = joiners.find((j) => j.id === e.target.value); if (j) onChange({ ...entry, joinerId: j.id, joinerName: j.name }); }}>
+            {joiners.map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Payment</label>
+          <select value={entry.paymentStatus} style={{ marginTop: 2 }} onChange={(e) => onChange({ ...entry, paymentStatus: e.target.value as JoinerPaymentStatus })}>
+            <option value="unpaid">Unpaid</option><option value="paid">Paid</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Deadline</label>
+          <input type="date" style={{ marginTop: 2 }} value={entry.deadline?.slice(0, 10) ?? ""} onChange={(e) => onChange({ ...entry, deadline: e.target.value || undefined })} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Proof URL</label>
+          <input style={{ marginTop: 2 }} value={entry.paymentProofUrl ?? ""} placeholder="https://..." onChange={(e) => onChange({ ...entry, paymentProofUrl: e.target.value || undefined })} />
+        </div>
+      </div>
+      {/* Simple item table */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 80px 100px 1fr 22px", gap: 6, marginBottom: 4 }}>
+        {["Item name", "Qty", "Price (€)", "Inclusions / notes", ""].map((h) => (
+          <div key={h} style={{ fontSize: "0.62rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</div>
+        ))}
+      </div>
+      {entry.items.map((item, idx) => (
+        <PersonalItemRow key={item.id} item={item}
+          onChange={(updated) => updateItem(idx, updated)}
+          onRemove={() => onChange({ ...entry, items: entry.items.filter((_, i) => i !== idx) })} />
+      ))}
+      <button type="button" onClick={() => onChange({ ...entry, items: [...entry.items, emptyPersonalItem()] })}
+        style={{ background: "none", border: "none", color: "var(--accent-blossom)", cursor: "pointer", fontSize: "0.78rem", marginTop: 4 }}>+ Add item</button>
     </div>
   );
 }
@@ -398,14 +386,12 @@ function ShopOrderModal({ initial, isNew, onClose }: { initial: ShopOrder; isNew
   const [form, setForm] = useState<ShopOrder>({
     ...initial,
     pricingOptions: initial.pricingOptions.map((p) => ({ ...p })),
-    joiners: initial.joiners.map((j) => ({
-      ...j,
-      items: j.items.map((it) => ({ ...it, membersClaimed: [...it.membersClaimed] })),
-    })),
+    joiners: initial.joiners.map((j) => ({ ...j, items: j.items.map((it) => ({ ...it, membersClaimed: [...it.membersClaimed] })) })),
   });
   const [groupModal, setGroupModal] = useState<{ group: KnownGroup; isNew: boolean } | null>(null);
   const setField = (f: keyof ShopOrder, v: unknown) => setForm((p) => ({ ...p, [f]: v }));
   const matchedGroup = knownGroups.find((g) => g.name.toLowerCase() === form.group.toLowerCase());
+  const isPersonal = form.orderType === "personal";
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -413,41 +399,51 @@ function ShopOrderModal({ initial, isNew, onClose }: { initial: ShopOrder; isNew
       ...form,
       dateOfOrder: new Date(form.dateOfOrder || Date.now()).toISOString(),
       shopDeadline: form.shopDeadline ? new Date(form.shopDeadline).toISOString() : undefined,
-      notes: form.notes || undefined,
-      round: form.round || undefined,
-      joiners: form.joiners.map((j) => ({
-        ...j,
-        deadline: j.deadline ? new Date(j.deadline).toISOString() : undefined,
-        paymentProofUrl: j.paymentProofUrl || undefined,
-      })),
+      notes: form.notes || undefined, round: form.round || undefined,
+      joiners: form.joiners.map((j) => ({ ...j, deadline: j.deadline ? new Date(j.deadline).toISOString() : undefined, paymentProofUrl: j.paymentProofUrl || undefined })),
     };
     isNew ? addShopOrder(final) : updateShopOrder(final.id, final);
-
-    // Auto-create fancall if flagged
     if (form.isFancall && isNew) {
       const defaultJoiner = joiners[0];
-      addFancall({
-        id: generateId("fc"),
-        shop: form.shop,
-        dateTime: final.dateOfOrder,
-        enteredByJoinerId: defaultJoiner?.id ?? "",
-        enteredByJoinerName: defaultJoiner?.name ?? "",
-        won: false, received: false,
-        shopOrderId: final.id,
-        benefitsToKaddy: undefined,
-        resultPage: undefined,
-      });
+      addFancall({ id: generateId("fc"), shop: form.shop, dateTime: final.dateOfOrder, enteredByJoinerId: defaultJoiner?.id ?? "", enteredByJoinerName: defaultJoiner?.name ?? "", won: false, received: false, shopOrderId: final.id, benefitsToKaddy: undefined, resultPage: undefined });
     }
     onClose();
   };
 
+  // Ensure personal order has exactly one joiner
+  const ensurePersonalJoiner = () => {
+    if (form.joiners.length === 0 && joiners[0]) {
+      setForm((p) => ({ ...p, joiners: [emptyJoiner(joiners[0].id, joiners[0].name)] }));
+    }
+  };
+
   return (
-    <Modal title={isNew ? "New Shop Order" : `Edit — ${initial.group} · ${initial.shop}`} onClose={onClose} width={820}>
-      {groupModal && (
-        <GroupManagerModal initial={groupModal.group} isNew={groupModal.isNew} onClose={() => setGroupModal(null)} />
-      )}
+    <Modal title={isNew ? (isPersonal ? "New Personal Order" : "New Group Order") : `Edit — ${initial.group} · ${initial.shop}`} onClose={onClose} width={820}>
+      {groupModal && <GroupManagerModal initial={groupModal.group} isNew={groupModal.isNew} onClose={() => setGroupModal(null)} />}
       <form onSubmit={submit}>
-        {/* Shop-level fields */}
+
+        {/* Order type selector — only shown when creating new */}
+        {isNew && (
+          <div style={{ display: "flex", gap: 4, marginBottom: "1.25rem", background: "var(--bg-elevated)", borderRadius: "var(--radius-md)", padding: 4 }}>
+            {(["group", "personal"] as OrderType[]).map((type) => (
+              <button key={type} type="button"
+                onClick={() => {
+                  setField("orderType", type);
+                  if (type === "personal") {
+                    setField("pricingOptions", []);
+                    setTimeout(ensurePersonalJoiner, 0);
+                  }
+                }}
+                style={{ flex: 1, padding: "8px 0", borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", fontSize: "0.875rem", fontWeight: 600, transition: "all 0.15s",
+                  background: form.orderType === type ? (type === "group" ? "var(--accent-blossom)" : "var(--accent-lavender)") : "transparent",
+                  color: form.orderType === type ? "#0d0f14" : "var(--text-muted)" }}>
+                {type === "group" ? "👥 Group Order" : "👤 Personal Order"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Common fields */}
         <FormRow cols={2}>
           <FormField label="Group">
             <div style={{ display: "flex", gap: 6 }}>
@@ -456,9 +452,7 @@ function ShopOrderModal({ initial, isNew, onClose }: { initial: ShopOrder; isNew
                 {knownGroups.map((g) => <option key={g.id} value={g.name}>{g.name}</option>)}
               </select>
               <button type="button" className="btn btn-ghost" style={{ flexShrink: 0, fontSize: "0.75rem", padding: "4px 8px" }}
-                onClick={() => setGroupModal(matchedGroup
-                  ? { group: matchedGroup, isNew: false }
-                  : { group: { id: generateId("kg"), name: form.group || "", members: [] }, isNew: true })}>
+                onClick={() => setGroupModal(matchedGroup ? { group: matchedGroup, isNew: false } : { group: { id: generateId("kg"), name: form.group || "", members: [] }, isNew: true })}>
                 {matchedGroup ? "✏️" : "+ New"}
               </button>
             </div>
@@ -470,21 +464,21 @@ function ShopOrderModal({ initial, isNew, onClose }: { initial: ShopOrder; isNew
             </select>
           </FormField>
         </FormRow>
-        <FormRow cols={4}>
+        <FormRow cols={isPersonal ? 3 : 4}>
           <FormField label="Date of Order">
-            <input type="date" value={form.dateOfOrder?.slice(0, 10) ?? ""}
-              onChange={(e) => setField("dateOfOrder", e.target.value)} />
+            <input type="date" value={form.dateOfOrder?.slice(0, 10) ?? ""} onChange={(e) => setField("dateOfOrder", e.target.value)} />
           </FormField>
-          <FormField label="Round">
-            <input value={form.round ?? ""} onChange={(e) => setField("round", e.target.value)} placeholder="e.g. Round 1" />
-          </FormField>
+          {!isPersonal && (
+            <FormField label="Round">
+              <input value={form.round ?? ""} onChange={(e) => setField("round", e.target.value)} placeholder="e.g. Round 1" />
+            </FormField>
+          )}
           <FormField label="Shop Deadline">
-            <input type="date" value={form.shopDeadline?.slice(0, 10) ?? ""}
-              onChange={(e) => setField("shopDeadline", e.target.value)} />
+            <input type="date" value={form.shopDeadline?.slice(0, 10) ?? ""} onChange={(e) => setField("shopDeadline", e.target.value)} />
           </FormField>
           <FormField label="Fulfillment">
-            <select value={form.fulfillmentStatus}
-              onChange={(e) => setField("fulfillmentStatus", e.target.value as OrderFulfillmentStatus)}>
+            <select value={form.fulfillmentStatus} onChange={(e) => setField("fulfillmentStatus", e.target.value as OrderFulfillmentStatus)}>
+              <option value="to_order">To Order</option>
               <option value="ordered">Ordered</option>
               <option value="received_at_kaddy">At Kaddy</option>
               <option value="otw_to_gom">OTW to GOM</option>
@@ -496,56 +490,83 @@ function ShopOrderModal({ initial, isNew, onClose }: { initial: ShopOrder; isNew
           <input value={form.notes ?? ""} onChange={(e) => setField("notes", e.target.value)} placeholder="Any notes" />
         </FormField>
 
-        {/* Fancall toggle */}
-        <div style={{ marginTop: "0.75rem" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textTransform: "none", letterSpacing: 0, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-            <input type="checkbox" checked={!!form.isFancall} onChange={(e) => setField("isFancall", e.target.checked)} style={{ width: "auto" }} />
-            <span>🎤 This round is a fancall</span>
-            {form.isFancall && isNew && (
-              <span style={{ fontSize: "0.72rem", color: "var(--accent-lavender)", background: "var(--accent-lavender-dim)", padding: "1px 8px", borderRadius: 99 }}>
-                Will auto-create a Fancall entry linked to this order
-              </span>
-            )}
-          </label>
-        </div>
-
-        {/* Pricing options */}
-        <div style={{ margin: "1.25rem 0 0.5rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>
-              Pricing Options
-            </div>
-            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>— set once by GOM, reused for all joiners' items</div>
-          </div>
-          <PricingOptionsEditor
-            options={form.pricingOptions}
-            onChange={(opts) => setField("pricingOptions", opts)}
-          />
-        </div>
-
-        {/* Joiners */}
-        <div style={{ margin: "1.25rem 0 0.75rem", paddingTop: "1rem", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>
-            Joiners ({form.joiners.length})
-          </div>
-          <button type="button" className="btn btn-ghost" style={{ fontSize: "0.78rem", padding: "4px 12px" }}
-            onClick={() => { const j = joiners[0]; if (j) setForm((p) => ({ ...p, joiners: [...p.joiners, emptyJoiner(j.id, j.name)] })); }}>
-            + Add Joiner
-          </button>
-        </div>
-        {form.joiners.length === 0 && (
-          <div style={{ textAlign: "center", padding: "0.875rem", color: "var(--text-muted)", fontSize: "0.85rem", border: "1px dashed var(--border)", borderRadius: "var(--radius-sm)", marginBottom: "0.75rem" }}>
-            No joiners yet
+        {/* Fancall toggle — group orders only */}
+        {!isPersonal && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textTransform: "none", letterSpacing: 0, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+              <input type="checkbox" checked={!!form.isFancall} onChange={(e) => setField("isFancall", e.target.checked)} style={{ width: "auto" }} />
+              <span>🎤 This round is a fancall</span>
+              {form.isFancall && isNew && <span style={{ fontSize: "0.72rem", color: "var(--accent-lavender)", background: "var(--accent-lavender-dim)", padding: "1px 8px", borderRadius: 99 }}>Will auto-create a Fancall entry</span>}
+            </label>
           </div>
         )}
-        {form.joiners.map((entry, idx) => (
-          <JoinerSection key={entry.id} entry={entry} pricingOptions={form.pricingOptions} groupName={form.group}
-            onChange={(updated) => setForm((p) => ({ ...p, joiners: p.joiners.map((j, i) => i === idx ? updated : j) }))}
-            onRemove={() => setForm((p) => ({ ...p, joiners: p.joiners.filter((_, i) => i !== idx) }))} />
-        ))}
+
+        {/* GROUP ORDER: pricing options + multiple joiners */}
+        {!isPersonal && (
+          <>
+            <div style={{ margin: "1.25rem 0 0.5rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>Pricing Options</div>
+                <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>— set once, reused for all joiners</div>
+              </div>
+              <PricingOptionsEditor options={form.pricingOptions} onChange={(opts) => setField("pricingOptions", opts)} />
+            </div>
+            <div style={{ margin: "1.25rem 0 0.75rem", paddingTop: "1rem", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>Joiners ({form.joiners.length})</div>
+              <button type="button" className="btn btn-ghost" style={{ fontSize: "0.78rem", padding: "4px 12px" }}
+                onClick={() => { const j = joiners[0]; if (j) setForm((p) => ({ ...p, joiners: [...p.joiners, emptyJoiner(j.id, j.name)] })); }}>
+                + Add Joiner
+              </button>
+            </div>
+            {form.joiners.length === 0 && <div style={{ textAlign: "center", padding: "0.875rem", color: "var(--text-muted)", fontSize: "0.85rem", border: "1px dashed var(--border)", borderRadius: "var(--radius-sm)", marginBottom: "0.75rem" }}>No joiners yet</div>}
+            {form.joiners.map((entry, idx) => (
+              <JoinerSection key={entry.id} entry={entry} pricingOptions={form.pricingOptions} groupName={form.group}
+                onChange={(updated) => setForm((p) => ({ ...p, joiners: p.joiners.map((j, i) => i === idx ? updated : j) }))}
+                onRemove={() => setForm((p) => ({ ...p, joiners: p.joiners.filter((_, i) => i !== idx) }))} />
+            ))}
+          </>
+        )}
+
+        {/* PERSONAL ORDER: single joiner, simple items */}
+        {isPersonal && (
+          <div style={{ marginTop: "1.25rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600, marginBottom: "0.75rem" }}>Joiner &amp; Items</div>
+            {form.joiners.length === 0 ? (
+              <button type="button" className="btn btn-ghost" onClick={() => { const j = joiners[0]; if (j) setForm((p) => ({ ...p, joiners: [emptyJoiner(j.id, j.name)] })); }}>
+                + Select Joiner
+              </button>
+            ) : (
+              <PersonalJoinerSection entry={form.joiners[0]} onChange={(updated) => setForm((p) => ({ ...p, joiners: [updated] }))} />
+            )}
+          </div>
+        )}
 
         <FormActions onClose={onClose} submitLabel={isNew ? "Create Order" : "Save Changes"} />
       </form>
+    </Modal>
+  );
+}
+
+// ── New order type picker ─────────────────────────────────────────────────────
+function NewOrderPicker({ onPick }: { onPick: (type: OrderType) => void }) {
+  return (
+    <Modal title="New Order" onClose={() => onPick("group")} width={400}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        <button type="button" onClick={() => onPick("group")}
+          style={{ padding: "1.25rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--bg-elevated)", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--accent-blossom)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}>
+          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 4 }}>👥 Group Order</div>
+          <div style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Multiple joiners, shared pricing options, member tracking</div>
+        </button>
+        <button type="button" onClick={() => onPick("personal")}
+          style={{ padding: "1.25rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--bg-elevated)", cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--accent-lavender)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}>
+          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 4 }}>👤 Personal Order</div>
+          <div style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Single joiner, simple item list with custom prices</div>
+        </button>
+      </div>
     </Modal>
   );
 }
@@ -555,33 +576,39 @@ export default function GomOrdersPage() {
   const { shopOrders, deleteShopOrder, weightCategories } = useApp();
   const [filterGroup, setFilterGroup] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterType, setFilterType] = useState("all");
   const [modal, setModal] = useState<{ order: ShopOrder; isNew: boolean } | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
 
   const groups = [...new Set(shopOrders.map((o) => o.group))];
   const filtered = shopOrders.filter((o) => {
     if (filterGroup !== "all" && o.group !== filterGroup) return false;
     if (filterStatus !== "all" && o.fulfillmentStatus !== filterStatus) return false;
+    if (filterType !== "all" && o.orderType !== filterType) return false;
     return true;
   });
 
   const getWcName = (id: string) => weightCategories.find((w) => w.id === id)?.name ?? "?";
-  const orderTotal = (o: ShopOrder) =>
-    o.joiners.reduce((s, j) => s + j.items.reduce((ss, it) => ss + it.pricePerUnit * it.quantity, 0), 0);
+  const orderTotal = (o: ShopOrder) => o.joiners.reduce((s, j) => s + j.items.reduce((ss, it) => ss + it.pricePerUnit * it.quantity, 0), 0);
   const unpaidCount = (o: ShopOrder) => o.joiners.filter((j) => j.paymentStatus === "unpaid").length;
 
   return (
     <div className="fade-in">
+      {showPicker && (
+        <NewOrderPicker onPick={(type) => { setShowPicker(false); setModal({ order: emptyOrder(type), isNew: true }); }} />
+      )}
       {modal && <ShopOrderModal initial={modal.order} isNew={modal.isNew} onClose={() => setModal(null)} />}
 
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 style={{ fontSize: "1.8rem" }}>All Orders</h1>
-          <p className="text-secondary text-sm mt-1">{filtered.length} shop orders</p>
+          <p className="text-secondary text-sm mt-1">{filtered.length} orders</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ order: emptyOrder(), isNew: true })}>+ New Order</button>
+        <button className="btn btn-primary" onClick={() => setShowPicker(true)}>+ New Order</button>
       </div>
 
+      {/* Filters */}
       <div className="card mb-6" style={{ display: "flex", gap: "1rem", alignItems: "flex-end" }}>
         <div style={{ flex: 1 }}>
           <label>Group</label>
@@ -594,41 +621,47 @@ export default function GomOrdersPage() {
           <label>Fulfillment</label>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value="all">All</option>
+            <option value="to_order">To Order</option>
             <option value="ordered">Ordered</option>
             <option value="received_at_kaddy">At Kaddy</option>
             <option value="otw_to_gom">OTW to GOM</option>
             <option value="arrived_to_gom">At GOM</option>
           </select>
         </div>
-        <button className="btn btn-ghost" onClick={() => { setFilterGroup("all"); setFilterStatus("all"); }}>Clear</button>
+        <div style={{ flex: 1 }}>
+          <label>Type</label>
+          <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="all">All types</option>
+            <option value="group">Group</option>
+            <option value="personal">Personal</option>
+          </select>
+        </div>
+        <button className="btn btn-ghost" onClick={() => { setFilterGroup("all"); setFilterStatus("all"); setFilterType("all"); }}>Clear</button>
       </div>
 
       {/* Order cards */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         {filtered.map((order) => {
           const isExpanded = expandedId === order.id;
-          const color = FULFILLMENT_COLOR[order.fulfillmentStatus];
+          const color = FULFILLMENT_COLOR[order.fulfillmentStatus] ?? "var(--text-muted)";
           const unpaid = unpaidCount(order);
+          const isPersonal = order.orderType === "personal";
 
           return (
-            <div key={order.id} className="card" style={{ borderLeft: `3px solid ${color}`, cursor: "pointer" }}
-              onClick={() => setExpandedId(isExpanded ? null : order.id)}>
-
-              {/* Card header */}
+            <div key={order.id} className="card" style={{ borderLeft: `3px solid ${color}`, cursor: "pointer" }} onClick={() => setExpandedId(isExpanded ? null : order.id)}>
               <div className="flex justify-between items-center">
                 <div>
                   <div style={{ fontWeight: 700, fontSize: "1rem" }}>
                     {order.group}
                     <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: 8, fontSize: "0.875rem" }}>· {order.shop}</span>
-                    {order.round && (
-                      <span style={{ marginLeft: 8, fontSize: "0.72rem", color: "var(--accent-lavender)", background: "var(--accent-lavender-dim)", padding: "1px 7px", borderRadius: 99 }}>
-                        {order.round}
-                      </span>
-                    )}
+                    {order.round && <span style={{ marginLeft: 8, fontSize: "0.72rem", color: "var(--accent-lavender)", background: "var(--accent-lavender-dim)", padding: "1px 7px", borderRadius: 99 }}>{order.round}</span>}
+                    <span style={{ marginLeft: 8, fontSize: "0.68rem", padding: "1px 7px", borderRadius: 99, background: isPersonal ? "var(--accent-lavender-dim)" : "var(--accent-blossom-dim)", color: isPersonal ? "var(--accent-lavender)" : "var(--accent-blossom)" }}>
+                      {isPersonal ? "👤 Personal" : "👥 Group"}
+                    </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
                     <span className="text-secondary text-sm">{formatDate(order.dateOfOrder)} · {order.joiners.length} joiner{order.joiners.length !== 1 ? "s" : ""}</span>
-                    {order.pricingOptions.map((opt) => (
+                    {!isPersonal && order.pricingOptions.map((opt) => (
                       <span key={opt.id} style={{ fontSize: "0.68rem", padding: "1px 7px", borderRadius: 99, background: "var(--accent-blossom-dim)", color: "var(--accent-blossom)" }}>
                         {opt.label} €{opt.priceEur.toFixed(2)}
                       </span>
@@ -647,69 +680,54 @@ export default function GomOrdersPage() {
                 </div>
               </div>
 
-              {/* Expanded view */}
               {isExpanded && (
-                <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}
-                  onClick={(e) => e.stopPropagation()}>
+                <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
                   {order.notes && <div className="text-secondary text-sm mb-3" style={{ fontStyle: "italic" }}>📝 {order.notes}</div>}
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                     {order.joiners.map((je) => {
                       const jTotal = je.items.reduce((s, it) => s + it.pricePerUnit * it.quantity, 0);
-                      // Gather all members across all items for display
                       const allMembers = [...new Map(je.items.flatMap((it) => it.membersClaimed).map((m) => [m.memberId, m])).values()];
-
                       return (
                         <div key={je.id} style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", padding: "0.75rem" }}>
                           <div className="flex justify-between items-center mb-2">
                             <div>
                               <span style={{ fontWeight: 600 }}>{je.joinerName}</span>
-                              {allMembers.length > 0 && (
-                                <span style={{ marginLeft: 8, fontSize: "0.75rem", color: "var(--accent-blossom)" }}>
-                                  {allMembers.map((m) => m.memberName).join(", ")}
-                                </span>
-                              )}
+                              {allMembers.length > 0 && <span style={{ marginLeft: 8, fontSize: "0.75rem", color: "var(--accent-blossom)" }}>{allMembers.map((m) => m.memberName).join(", ")}</span>}
                             </div>
                             <div className="flex items-center gap-2">
                               {je.deadline && <span style={{ fontSize: "0.72rem", color: "var(--accent-gold)" }}>⏰ {formatDate(je.deadline)}</span>}
-                              <span className="badge" style={{ background: je.paymentStatus === "paid" ? "var(--accent-mint-dim)" : "#f4758a20", color: je.paymentStatus === "paid" ? "var(--accent-mint)" : "var(--status-unpaid)" }}>
-                                {je.paymentStatus}
-                              </span>
+                              <span className="badge" style={{ background: je.paymentStatus === "paid" ? "var(--accent-mint-dim)" : "#f4758a20", color: je.paymentStatus === "paid" ? "var(--accent-mint)" : "var(--status-unpaid)" }}>{je.paymentStatus}</span>
                               <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "0.85rem", color: "var(--accent-gold)", fontWeight: 600 }}>{formatEur(jTotal)}</span>
                             </div>
                           </div>
-
                           {je.items.length > 0 && (
                             <table style={{ fontSize: "0.78rem", width: "100%" }}>
-                              <thead>
-                                <tr>
-                                  {["Members", "Description", "Qty", "Option", "Price", "Inclusions", "Total"].map((h) => (
-                                    <th key={h} style={{ textAlign: "left", color: "var(--text-muted)", fontSize: "0.62rem", padding: "2px 6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
+                              <thead><tr>
+                                {(isPersonal ? ["Item", "Qty", "Price", "Inclusions", "Total"] : ["Members", "Description", "Qty", "Option", "Price", "Inclusions", "Total"]).map((h) => (
+                                  <th key={h} style={{ textAlign: "left", color: "var(--text-muted)", fontSize: "0.62rem", padding: "2px 6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                                ))}
+                              </tr></thead>
                               <tbody>
                                 {je.items.map((it) => {
                                   const opt = order.pricingOptions.find((o) => o.id === it.pricingOptionId);
                                   return (
                                     <tr key={it.id}>
-                                      <td style={{ padding: "3px 6px" }}>
-                                        {it.membersClaimed.length > 0 ? (
-                                          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                                            {it.membersClaimed.map((m) => (
-                                              <span key={m.memberId} style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: 99, background: "var(--accent-blossom-dim)", color: "var(--accent-blossom)" }}>
-                                                {m.memberName}
-                                              </span>
-                                            ))}
-                                          </div>
-                                        ) : <span style={{ color: "var(--text-muted)", fontSize: "0.72rem" }}>—</span>}
-                                      </td>
+                                      {!isPersonal && (
+                                        <td style={{ padding: "3px 6px" }}>
+                                          {it.membersClaimed.length > 0
+                                            ? <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>{it.membersClaimed.map((m) => <span key={m.memberId} style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: 99, background: "var(--accent-blossom-dim)", color: "var(--accent-blossom)" }}>{m.memberName}</span>)}</div>
+                                            : <span style={{ color: "var(--text-muted)", fontSize: "0.72rem" }}>—</span>}
+                                        </td>
+                                      )}
                                       <td style={{ padding: "3px 6px", color: "var(--text-secondary)" }}>{it.name || "—"}</td>
                                       <td style={{ padding: "3px 6px", color: "var(--text-secondary)" }}>×{it.quantity}</td>
-                                      <td style={{ padding: "3px 6px" }}>
-                                        <span style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: 99, background: it.pricingOptionId === "custom" ? "var(--accent-gold-dim)" : "var(--accent-blossom-dim)", color: it.pricingOptionId === "custom" ? "var(--accent-gold)" : "var(--accent-blossom)" }}>
-                                          {opt?.label ?? "Custom"}
-                                        </span>
-                                      </td>
+                                      {!isPersonal && (
+                                        <td style={{ padding: "3px 6px" }}>
+                                          <span style={{ fontSize: "0.65rem", padding: "1px 6px", borderRadius: 99, background: it.pricingOptionId === "custom" ? "var(--accent-gold-dim)" : "var(--accent-blossom-dim)", color: it.pricingOptionId === "custom" ? "var(--accent-gold)" : "var(--accent-blossom)" }}>
+                                            {opt?.label ?? "Custom"}
+                                          </span>
+                                        </td>
+                                      )}
                                       <td style={{ padding: "3px 6px", fontFamily: "'DM Mono', monospace", color: "var(--accent-mint)" }}>€{it.pricePerUnit.toFixed(2)}</td>
                                       <td style={{ padding: "3px 6px", color: "var(--text-muted)", fontSize: "0.72rem" }}>{it.inclusions || "—"}</td>
                                       <td style={{ padding: "3px 6px", fontFamily: "'DM Mono', monospace", color: "var(--accent-gold)", textAlign: "right" }}>€{(it.pricePerUnit * it.quantity).toFixed(2)}</td>
@@ -728,9 +746,7 @@ export default function GomOrdersPage() {
             </div>
           );
         })}
-        {filtered.length === 0 && (
-          <div className="card" style={{ textAlign: "center", padding: "3rem", color: "var(--text-muted)" }}>No orders found ✦</div>
-        )}
+        {filtered.length === 0 && <div className="card" style={{ textAlign: "center", padding: "3rem", color: "var(--text-muted)" }}>No orders found ✦</div>}
       </div>
     </div>
   );

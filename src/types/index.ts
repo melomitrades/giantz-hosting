@@ -34,6 +34,7 @@ export interface KnownGroup {
 // ─── Shop Orders (new shop-based structure) ───────────────────────────────────
 
 export type OrderFulfillmentStatus =
+  | "to_order"
   | "ordered"
   | "received_at_kaddy"
   | "otw_to_gom"
@@ -76,6 +77,8 @@ export interface JoinerEntry {
   deadline?: string;
 }
 
+export type OrderType = "group" | "personal";
+
 // One ShopOrder = one group order for a specific shop
 export interface ShopOrder {
   id: string;
@@ -83,6 +86,7 @@ export interface ShopOrder {
   shop: string;
   dateOfOrder: string;
   fulfillmentStatus: OrderFulfillmentStatus;
+  orderType: OrderType;     // "group" | "personal"
   round?: string;
   isFancall?: boolean;       // if true, a fancall entry is auto-linked
   pricingOptions: PricingOption[]; // defined once per order, reused by all joiners
