@@ -48,9 +48,10 @@ model ShopOrder {
   id                String  @id
   group             String
   shop              String
+  orderType         String  @default("group")
   round             String?
   isFancall         Boolean @default(false)
-  fulfillmentStatus String  @default("ordered")
+  fulfillmentStatus String  @default("to_order")
   dateOfOrder       String
   shopDeadline      String?
   notes             String?
