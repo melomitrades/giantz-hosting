@@ -178,7 +178,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Parse JSON string fields that the DB returns as raw strings
   function parseJsonFields<T>(row: T): T {
-    const jsonFields = ["pricingOptions", "joiners", "shopOrderIds", "joinerFees", "coveringLog", "versions", "memberSlots"];
+    const jsonFields = ["pricingOptions", "joiners", "shopOrderIds", "joinerFees", "coveringLog", "versions", "memberSlots", "fixedJoiners"];
     const r = { ...(row as Record<string, unknown>) };
     for (const f of jsonFields) {
       if (typeof r[f] === "string") {
@@ -194,22 +194,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setter: React.Dispatch<React.SetStateAction<T[]>>
   ) {
     const add = async (item: T) => {
-      // Optimistic add first so UI is instant
       setter((p) => [item, ...p]);
       try {
         const saved = await post(endpoint, item);
-        // Replace optimistic item with server response (parse JSON fields)
         setter((p) => p.map((x) => x.id === item.id ? parseJsonFields(saved) : x));
       } catch (e) {
         console.error("Failed to save:", e);
-        // Revert optimistic add on error
         setter((p) => p.filter((x) => x.id !== item.id));
       }
     };
     const update = async (id: string, updates: Partial<T>) => {
-      // Optimistic update
       setter((p) => p.map((x) => x.id === id ? { ...x, ...updates } : x));
-      // Send full merged object to API so no fields get wiped
       setter((current) => {
         const full = current.find((x) => x.id === id);
         if (full) put(`${endpoint}/${id}`, full).catch(console.error);
@@ -223,7 +218,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { add, update, remove };
   }
 
-  const usersCrud = makeCrud<User>("users", setUsers);
+  // ── Dedicated user CRUD (strips unknown fields before sending) ─────────────
+  const addUser = useCallback(async (user: User) => {
+    const data = { id: user.id, name: user.name, role: user.role, email: user.email };
+    setUsers((p) => [data, ...p]);
+    try {
+      const saved = await post("users", data);
+      setUsers((p) => p.map((x) => x.id === data.id ? saved : x));
+    } catch (e) {
+      console.error(e);
+      setUsers((p) => p.filter((x) => x.id !== data.id));
+    }
+  }, []);
+
+  const updateUser = useCallback(async (id: string, updates: Partial<User>) => {
+    const data = { id, name: updates.name, role: updates.role, email: updates.email };
+    setUsers((p) => p.map((x) => x.id === id ? { ...x, ...data } : x));
+    await put(`users/${id}`, data).catch(console.error);
+  }, []);
+
+  const deleteUser = useCallback(async (id: string) => {
+    setUsers((p) => p.filter((x) => x.id !== id));
+    await del(`users/${id}`).catch(console.error);
+  }, []);
+
+  // ── Dedicated group CRUD (handles members relation correctly) ──────────────
+  const addKnownGroup = useCallback(async (group: KnownGroup) => {
+    setKnownGroups((p) => [group, ...p]);
+    try {
+      const saved = await post("known-groups", {
+        id: group.id, name: group.name,
+        members: group.members.map((m) => ({ id: m.id, name: m.name })),
+        fixedJoiners: group.fixedJoiners ?? [],
+      });
+      setKnownGroups((p) => p.map((x) => x.id === group.id ? parseJsonFields(saved) : x));
+    } catch (e) {
+      console.error(e);
+      setKnownGroups((p) => p.filter((x) => x.id !== group.id));
+    }
+  }, []);
+
+  const updateKnownGroup = useCallback(async (id: string, updates: Partial<KnownGroup>) => {
+    setKnownGroups((p) => p.map((x) => x.id === id ? { ...x, ...updates } : x));
+    await put(`known-groups/${id}`, {
+      name: updates.name,
+      members: (updates.members ?? []).map((m) => ({ id: m.id, name: m.name })),
+      fixedJoiners: updates.fixedJoiners ?? [],
+    }).catch(console.error);
+  }, []);
+
+  const deleteKnownGroup = useCallback(async (id: string) => {
+    setKnownGroups((p) => p.filter((x) => x.id !== id));
+    await del(`known-groups/${id}`).catch(console.error);
+  }, []);
+
+  const usersCrud = { add: addUser, update: updateUser, remove: deleteUser };
+  const groupsCrud = { add: addKnownGroup, update: updateKnownGroup, remove: deleteKnownGroup };
   const ordersCrud = makeCrud<ShopOrder>("shop-orders", setShopOrders);
   const shippingCrud = makeCrud<ShippingPackage>("shipping", setShipping);
   const paymentsCrud = makeCrud<PaymentRecord>("payments", setPayments);
@@ -231,7 +281,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const shopsCrud = makeCrud<Shop>("shops", setShops);
   const addyCrud = makeCrud<AddyItem>("addy", setAddyItems);
   const wcCrud = makeCrud<WeightCategory>("weight-categories", setWeightCategories);
-  const groupsCrud = makeCrud<KnownGroup>("known-groups", setKnownGroups);
   const boxesCrud = makeCrud<Box>("boxes", setBoxes);
   const ssCrud = makeCrud<SortingSession>("sorting-sessions", setSortingSessions);
 
@@ -250,7 +299,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addyItems, notifications, weightCategories, knownGroups, boxes,
       addyAddresses, sortingSessions, eurToKrw, loading, unreadCount,
       setRole, switchToJoiner, markNotificationRead,
-      addUser: usersCrud.add, updateUser: usersCrud.update, deleteUser: usersCrud.remove,
+      addUser, updateUser, deleteUser,
       addShopOrder: ordersCrud.add, updateShopOrder: ordersCrud.update, deleteShopOrder: ordersCrud.remove,
       addShipping: shippingCrud.add, updateShipping: shippingCrud.update, deleteShipping: shippingCrud.remove,
       addPayment: paymentsCrud.add, updatePayment: paymentsCrud.update, deletePayment: paymentsCrud.remove,
@@ -258,7 +307,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addShop: shopsCrud.add, updateShop: shopsCrud.update, deleteShop: shopsCrud.remove,
       addAddyItem: addyCrud.add, updateAddyItem: addyCrud.update, deleteAddyItem: addyCrud.remove,
       addWeightCategory: wcCrud.add, updateWeightCategory: wcCrud.update, deleteWeightCategory: wcCrud.remove,
-      addKnownGroup: groupsCrud.add, updateKnownGroup: groupsCrud.update, deleteKnownGroup: groupsCrud.remove,
+      addKnownGroup, updateKnownGroup, deleteKnownGroup,
       addBox: boxesCrud.add, updateBox: boxesCrud.update, deleteBox: boxesCrud.remove,
       addSortingSession: ssCrud.add, updateSortingSession: ssCrud.update, deleteSortingSession: ssCrud.remove,
       setAddyAddresses, setEurToKrw,
