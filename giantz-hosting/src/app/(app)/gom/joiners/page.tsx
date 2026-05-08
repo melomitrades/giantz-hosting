@@ -7,15 +7,8 @@ import { User } from "@/types";
 import Modal, { FormField, FormActions } from "@/components/shared/Modal";
 
 function JoinerModal({ initial, isNew, onClose }: { initial: User; isNew: boolean; onClose: () => void }) {
-  const { addUser, updateUser, knownGroups } = useApp();
-  const [form, setForm] = useState<User>({ ...initial, fixedForGroups: initial.fixedForGroups ?? [] });
-
-  const toggleGroup = (groupName: string) => {
-    setForm((p) => {
-      const fixed = p.fixedForGroups ?? [];
-      return { ...p, fixedForGroups: fixed.includes(groupName) ? fixed.filter((g) => g !== groupName) : [...fixed, groupName] };
-    });
-  };
+  const { addUser, updateUser } = useApp();
+  const [form, setForm] = useState<User>({ ...initial });
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +18,7 @@ function JoinerModal({ initial, isNew, onClose }: { initial: User; isNew: boolea
   };
 
   return (
-    <Modal title={isNew ? "Add Joiner" : `Edit — ${initial.name}`} onClose={onClose} width={460}>
+    <Modal title={isNew ? "Add Joiner" : `Edit — ${initial.name}`} onClose={onClose} width={420}>
       <form onSubmit={submit}>
         <FormField label="Username / Display Name">
           <input required value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. 소율 (Soyul)" autoFocus />
@@ -35,31 +28,6 @@ function JoinerModal({ initial, isNew, onClose }: { initial: User; isNew: boolea
             <input type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} placeholder="joiner@example.com" />
           </FormField>
         </div>
-
-        {/* Fixed groups */}
-        {knownGroups.length > 0 && (
-          <div style={{ marginTop: "1rem" }}>
-            <label style={{ fontSize: "0.72rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", display: "block", marginBottom: 8 }}>
-              Fixed for groups
-              <span style={{ marginLeft: 6, fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "none", letterSpacing: 0 }}>— auto-added to every new order from these groups</span>
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {knownGroups.map((g) => {
-                const fixed = (form.fixedForGroups ?? []).includes(g.name);
-                return (
-                  <button key={g.id} type="button" onClick={() => toggleGroup(g.name)}
-                    style={{ padding: "4px 12px", borderRadius: 99, fontSize: "0.78rem", cursor: "pointer", border: "1px solid", transition: "all 0.12s",
-                      background: fixed ? "var(--accent-lavender)" : "transparent",
-                      color: fixed ? "#0d0f14" : "var(--text-muted)",
-                      borderColor: fixed ? "var(--accent-lavender)" : "var(--border)" }}>
-                    {fixed ? "📌 " : ""}{g.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         <FormActions onClose={onClose} submitLabel={isNew ? "Add Joiner" : "Save Changes"} />
       </form>
     </Modal>
@@ -67,7 +35,7 @@ function JoinerModal({ initial, isNew, onClose }: { initial: User; isNew: boolea
 }
 
 function emptyJoiner(): User {
-  return { id: generateId("u"), name: "", role: "joiner", email: "", fixedForGroups: [] };
+  return { id: generateId("u"), name: "", role: "joiner", email: "" };
 }
 
 export default function GomJoinersPage() {
@@ -77,8 +45,13 @@ export default function GomJoinersPage() {
 
   const orderCountFor = (joinerId: string) =>
     shopOrders.filter((o) => o.joiners.some((j) => j.joinerId === joinerId)).length;
+
   const unpaidCountFor = (joinerId: string) =>
     shopOrders.flatMap((o) => o.joiners).filter((j) => j.joinerId === joinerId && j.paymentStatus === "unpaid").length;
+
+  // Which groups have this joiner as fixed
+  const fixedGroupsFor = (joinerId: string) =>
+    knownGroups.filter((g) => (g.fixedJoiners ?? []).includes(joinerId)).map((g) => g.name);
 
   return (
     <div className="fade-in">
@@ -96,7 +69,7 @@ export default function GomJoinersPage() {
         {joiners.map((j) => {
           const orders = orderCountFor(j.id);
           const unpaid = unpaidCountFor(j.id);
-          const fixedGroups = j.fixedForGroups ?? [];
+          const fixedGroups = fixedGroupsFor(j.id);
           return (
             <div key={j.id} className="card">
               <div className="flex justify-between items-center">
@@ -110,8 +83,8 @@ export default function GomJoinersPage() {
                     {fixedGroups.length > 0 && (
                       <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
                         {fixedGroups.map((g) => (
-                          <span key={g} style={{ fontSize: "0.68rem", padding: "1px 7px", borderRadius: 99, background: "var(--accent-lavender-dim)", color: "var(--accent-lavender)" }}>
-                            📌 {g}
+                          <span key={g} style={{ fontSize: "0.68rem", padding: "1px 7px", borderRadius: 99, background: "var(--accent-mint-dim)", color: "var(--accent-mint)" }}>
+                            ✓ Fixed: {g}
                           </span>
                         ))}
                       </div>
@@ -130,7 +103,9 @@ export default function GomJoinersPage() {
           );
         })}
         {joiners.length === 0 && (
-          <div className="card" style={{ textAlign: "center", padding: "3rem", color: "var(--text-muted)" }}>No joiners yet ✦</div>
+          <div className="card" style={{ textAlign: "center", padding: "3rem", color: "var(--text-muted)" }}>
+            No joiners yet — add the first one ✦
+          </div>
         )}
       </div>
     </div>

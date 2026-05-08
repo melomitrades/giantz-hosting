@@ -13,7 +13,6 @@ model User {
   name            String
   role            String
   email           String @default("")
-  fixedForGroups  String @default("[]") // JSON: string[]
 }
 
 model KnownGroup {
