@@ -1,28 +1,329 @@
-const addKnownGroup = useCallback(async (group: KnownGroup) => {
-  setKnownGroups((p) => [group, ...p]);
-  try {
-    const saved = await post("known-groups", {
-      id: group.id, name: group.name,
-      members: group.members.map((m) => ({ id: m.id, name: m.name })),
-      fixedJoiners: group.fixedJoiners ?? [],
+"use client";
+
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import {
+  ShopOrder, ShippingPackage, PaymentRecord, Fancall, Shop, AddyItem,
+  Notification, User, UserRole, WeightCategory, KnownGroup, Box,
+  AddyAddresses, SortingSession,
+} from "@/types";
+
+// â”€â”€ API helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function api(path: string, method = "GET", body?: unknown) {
+  const res = await fetch(`/api/${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+const get = (path: string) => api(path);
+const post = (path: string, body: unknown) => api(path, "POST", body);
+const put = (path: string, body: unknown) => api(path, "PUT", body);
+const del = (path: string) => api(path, "DELETE");
+
+// â”€â”€ Context type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+interface AppContextValue {
+  currentUser: User;
+  users: User[];
+  shopOrders: ShopOrder[];
+  shipping: ShippingPackage[];
+  payments: PaymentRecord[];
+  fancalls: Fancall[];
+  shops: Shop[];
+  addyItems: AddyItem[];
+  notifications: Notification[];
+  weightCategories: WeightCategory[];
+  knownGroups: KnownGroup[];
+  boxes: Box[];
+  addyAddresses: AddyAddresses;
+  sortingSessions: SortingSession[];
+  eurToKrw: number;
+  loading: boolean;
+  unreadCount: number;
+
+  setRole: (role: UserRole) => void;
+  switchToJoiner: (id: string) => void;
+  markNotificationRead: (id: string) => void;
+
+  addUser: (u: User) => Promise<void>;
+  updateUser: (id: string, u: Partial<User>) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
+
+  addShopOrder: (o: ShopOrder) => Promise<void>;
+  updateShopOrder: (id: string, u: Partial<ShopOrder>) => Promise<void>;
+  deleteShopOrder: (id: string) => Promise<void>;
+
+  addShipping: (p: ShippingPackage) => Promise<void>;
+  updateShipping: (id: string, u: Partial<ShippingPackage>) => Promise<void>;
+  deleteShipping: (id: string) => Promise<void>;
+
+  addPayment: (p: PaymentRecord) => Promise<void>;
+  updatePayment: (id: string, u: Partial<PaymentRecord>) => Promise<void>;
+  deletePayment: (id: string) => Promise<void>;
+
+  addFancall: (f: Fancall) => Promise<void>;
+  updateFancall: (id: string, u: Partial<Fancall>) => Promise<void>;
+  deleteFancall: (id: string) => Promise<void>;
+
+  addShop: (s: Shop) => Promise<void>;
+  updateShop: (id: string, u: Partial<Shop>) => Promise<void>;
+  deleteShop: (id: string) => Promise<void>;
+
+  addAddyItem: (a: AddyItem) => Promise<void>;
+  updateAddyItem: (id: string, u: Partial<AddyItem>) => Promise<void>;
+  deleteAddyItem: (id: string) => Promise<void>;
+
+  addWeightCategory: (w: WeightCategory) => Promise<void>;
+  updateWeightCategory: (id: string, u: Partial<WeightCategory>) => Promise<void>;
+  deleteWeightCategory: (id: string) => Promise<void>;
+
+  addKnownGroup: (g: KnownGroup) => Promise<void>;
+  updateKnownGroup: (id: string, u: Partial<KnownGroup>) => Promise<void>;
+  deleteKnownGroup: (id: string) => Promise<void>;
+
+  addBox: (b: Box) => Promise<void>;
+  updateBox: (id: string, u: Partial<Box>) => Promise<void>;
+  deleteBox: (id: string) => Promise<void>;
+
+  setAddyAddresses: (a: AddyAddresses) => Promise<void>;
+
+  addSortingSession: (s: SortingSession) => Promise<void>;
+  updateSortingSession: (id: string, u: Partial<SortingSession>) => Promise<void>;
+  deleteSortingSession: (id: string) => Promise<void>;
+
+  setEurToKrw: (rate: number) => void;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+// â”€â”€ Fallback empty state (shown while loading) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const EMPTY_ADDRESSES: AddyAddresses = { korea: "", china: "", japan: "", other: "" };
+const DEFAULT_GOM: User = { id: "u4", name: "GOM Admin", role: "gom", email: "" };
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<User[]>([]);
+  const [currentUser, setCurrentUser] = useState<User>(DEFAULT_GOM);
+  const [shopOrders, setShopOrders] = useState<ShopOrder[]>([]);
+  const [shipping, setShipping] = useState<ShippingPackage[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [fancalls, setFancalls] = useState<Fancall[]>([]);
+  const [shops, setShops] = useState<Shop[]>([]);
+  const [addyItems, setAddyItems] = useState<AddyItem[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [weightCategories, setWeightCategories] = useState<WeightCategory[]>([]);
+  const [knownGroups, setKnownGroups] = useState<KnownGroup[]>([]);
+  const [boxes, setBoxes] = useState<Box[]>([]);
+  const [addyAddresses, setAddyAddressesState] = useState<AddyAddresses>(EMPTY_ADDRESSES);
+  const [sortingSessions, setSortingSessions] = useState<SortingSession[]>([]);
+  const [eurToKrw, setEurToKrw] = useState(1480);
+
+  // â”€â”€ Load all data on mount â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    Promise.all([
+      get("users"),
+      get("known-groups"),
+      get("weight-categories"),
+      get("shops"),
+      get("shop-orders"),
+      get("fancalls"),
+      get("shipping"),
+      get("payments"),
+      get("addy"),
+      get("addy-addresses"),
+      get("boxes"),
+      get("sorting-sessions"),
+      get("notifications"),
+    ]).then(([u, kg, wc, sh, so, fc, sp, pay, addy, addyAddr, bx, ss, notifs]) => {
+      setUsers(u);
+      setCurrentUser(u.find((x: User) => x.role === "gom") ?? DEFAULT_GOM);
+      setKnownGroups(kg);
+      setWeightCategories(wc);
+      setShops(sh);
+      setShopOrders(so);
+      setFancalls(fc);
+      setShipping(sp);
+      setPayments(pay);
+      setAddyItems(addy);
+      setAddyAddressesState(addyAddr);
+      setBoxes(bx);
+      setSortingSessions(ss);
+      setNotifications(notifs);
+      setLoading(false);
+    }).catch((e) => {
+      console.error("Failed to load data:", e);
+      setLoading(false);
     });
-    setKnownGroups((p) => p.map((x) => x.id === group.id ? parseJsonFields(saved) : x));
-  } catch (e) {
-    console.error(e);
-    setKnownGroups((p) => p.filter((x) => x.id !== group.id));
+  }, []);
+
+  // â”€â”€ Role switching (local only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const setRole = useCallback((role: UserRole) => {
+    setCurrentUser((prev) => {
+      if (prev.role === role) return prev;
+      return users.find((u) => u.role === role) ?? prev;
+    });
+  }, [users]);
+
+  const switchToJoiner = useCallback((id: string) => {
+    const u = users.find((u) => u.id === id);
+    if (u) setCurrentUser(u);
+  }, [users]);
+
+  const markNotificationRead = useCallback(async (id: string) => {
+    await put(`notifications/${id}`, { read: true });
+    setNotifications((p) => p.map((n) => n.id === id ? { ...n, read: true } : n));
+  }, []);
+
+  // Parse JSON string fields that the DB returns as raw strings
+  function parseJsonFields<T>(row: T): T {
+    const jsonFields = ["pricingOptions", "joiners", "shopOrderIds", "joinerFees", "coveringLog", "versions", "memberSlots", "fixedJoiners"];
+    const r = { ...(row as Record<string, unknown>) };
+    for (const f of jsonFields) {
+      if (typeof r[f] === "string") {
+        try { r[f] = JSON.parse(r[f] as string); } catch {}
+      }
+    }
+    return r as T;
   }
-}, []);
 
-const updateKnownGroup = useCallback(async (id: string, updates: Partial<KnownGroup>) => {
-  setKnownGroups((p) => p.map((x) => x.id === id ? { ...x, ...updates } : x));
-  await put(`known-groups/${id}`, {
-    name: updates.name,
-    members: (updates.members ?? []).map((m) => ({ id: m.id, name: m.name })),
-    fixedJoiners: updates.fixedJoiners ?? [],
-  }).catch(console.error);
-}, []);
+  // â”€â”€ CRUD factories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  function makeCrud<T extends { id: string }>(
+    endpoint: string,
+    setter: React.Dispatch<React.SetStateAction<T[]>>
+  ) {
+    const add = async (item: T) => {
+      setter((p) => [item, ...p]);
+      try {
+        const saved = await post(endpoint, item);
+        setter((p) => p.map((x) => x.id === item.id ? parseJsonFields(saved) : x));
+      } catch (e) {
+        console.error("Failed to save:", e);
+        setter((p) => p.filter((x) => x.id !== item.id));
+      }
+    };
+    const update = async (id: string, updates: Partial<T>) => {
+      setter((p) => p.map((x) => x.id === id ? { ...x, ...updates } : x));
+      setter((current) => {
+        const full = current.find((x) => x.id === id);
+        if (full) put(`${endpoint}/${id}`, full).catch(console.error);
+        return current;
+      });
+    };
+    const remove = async (id: string) => {
+      setter((p) => p.filter((x) => x.id !== id));
+      await del(`${endpoint}/${id}`).catch(console.error);
+    };
+    return { add, update, remove };
+  }
 
-const deleteKnownGroup = useCallback(async (id: string) => {
-  setKnownGroups((p) => p.filter((x) => x.id !== id));
-  await del(`known-groups/${id}`).catch(console.error);
-}, []);
+  // â”€â”€ Dedicated user CRUD (strips unknown fields before sending) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const addUser = useCallback(async (user: User) => {
+    const data = { id: user.id, name: user.name, role: user.role, email: user.email };
+    setUsers((p) => [data, ...p]);
+    try {
+      const saved = await post("users", data);
+      setUsers((p) => p.map((x) => x.id === data.id ? saved : x));
+    } catch (e) {
+      console.error(e);
+      setUsers((p) => p.filter((x) => x.id !== data.id));
+    }
+  }, []);
+
+  const updateUser = useCallback(async (id: string, updates: Partial<User>) => {
+    const data: User = { id, name: updates.name ?? "", role: updates.role ?? "joiner", email: updates.email ?? "" };
+    setUsers((p) => p.map((x) => x.id === id ? data : x));
+    await put(`users/${id}`, data).catch(console.error);
+  }, []);
+
+  const deleteUser = useCallback(async (id: string) => {
+    setUsers((p) => p.filter((x) => x.id !== id));
+    await del(`users/${id}`).catch(console.error);
+  }, []);
+
+  // â”€â”€ Dedicated group CRUD (handles members relation correctly) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const addKnownGroup = useCallback(async (group: KnownGroup) => {
+    setKnownGroups((p) => [group, ...p]);
+    try {
+      const saved = await post("known-groups", {
+        id: group.id, name: group.name,
+        members: group.members.map((m) => ({ id: m.id, name: m.name })),
+        fixedJoiners: group.fixedJoiners ?? [],
+      });
+      setKnownGroups((p) => p.map((x) => x.id === group.id ? parseJsonFields(saved) : x));
+    } catch (e) {
+      console.error(e);
+      setKnownGroups((p) => p.filter((x) => x.id !== group.id));
+    }
+  }, []);
+
+  const updateKnownGroup = useCallback(async (id: string, updates: Partial<KnownGroup>) => {
+    setKnownGroups((p) => p.map((x) => x.id === id ? { ...x, ...updates } : x));
+    await put(`known-groups/${id}`, {
+      name: updates.name,
+      members: (updates.members ?? []).map((m) => ({ id: m.id, name: m.name })),
+      fixedJoiners: updates.fixedJoiners ?? [],
+    }).catch(console.error);
+  }, []);
+
+  const deleteKnownGroup = useCallback(async (id: string) => {
+    setKnownGroups((p) => p.filter((x) => x.id !== id));
+    await del(`known-groups/${id}`).catch(console.error);
+  }, []);
+
+  const usersCrud = { add: addUser, update: updateUser, remove: deleteUser };
+  const groupsCrud = { add: addKnownGroup, update: updateKnownGroup, remove: deleteKnownGroup };
+  const ordersCrud = makeCrud<ShopOrder>("shop-orders", setShopOrders);
+  const shippingCrud = makeCrud<ShippingPackage>("shipping", setShipping);
+  const paymentsCrud = makeCrud<PaymentRecord>("payments", setPayments);
+  const fancallsCrud = makeCrud<Fancall>("fancalls", setFancalls);
+  const shopsCrud = makeCrud<Shop>("shops", setShops);
+  const addyCrud = makeCrud<AddyItem>("addy", setAddyItems);
+  const wcCrud = makeCrud<WeightCategory>("weight-categories", setWeightCategories);
+  const boxesCrud = makeCrud<Box>("boxes", setBoxes);
+  const ssCrud = makeCrud<SortingSession>("sorting-sessions", setSortingSessions);
+
+  const setAddyAddresses = useCallback(async (a: AddyAddresses) => {
+    const saved = await put("addy-addresses", a);
+    setAddyAddressesState(saved);
+  }, []);
+
+  const unreadCount = notifications.filter(
+    (n) => !n.read && (n.forRole === currentUser.role || n.forRole === "both")
+  ).length;
+
+  return (
+    <AppContext.Provider value={{
+      currentUser, users, shopOrders, shipping, payments, fancalls, shops,
+      addyItems, notifications, weightCategories, knownGroups, boxes,
+      addyAddresses, sortingSessions, eurToKrw, loading, unreadCount,
+      setRole, switchToJoiner, markNotificationRead,
+      addUser, updateUser, deleteUser,
+      addShopOrder: ordersCrud.add, updateShopOrder: ordersCrud.update, deleteShopOrder: ordersCrud.remove,
+      addShipping: shippingCrud.add, updateShipping: shippingCrud.update, deleteShipping: shippingCrud.remove,
+      addPayment: paymentsCrud.add, updatePayment: paymentsCrud.update, deletePayment: paymentsCrud.remove,
+      addFancall: fancallsCrud.add, updateFancall: fancallsCrud.update, deleteFancall: fancallsCrud.remove,
+      addShop: shopsCrud.add, updateShop: shopsCrud.update, deleteShop: shopsCrud.remove,
+      addAddyItem: addyCrud.add, updateAddyItem: addyCrud.update, deleteAddyItem: addyCrud.remove,
+      addWeightCategory: wcCrud.add, updateWeightCategory: wcCrud.update, deleteWeightCategory: wcCrud.remove,
+      addKnownGroup, updateKnownGroup, deleteKnownGroup,
+      addBox: boxesCrud.add, updateBox: boxesCrud.update, deleteBox: boxesCrud.remove,
+      addSortingSession: ssCrud.add, updateSortingSession: ssCrud.update, deleteSortingSession: ssCrud.remove,
+      setAddyAddresses, setEurToKrw,
+    }}>
+      {loading ? (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", color: "var(--text-muted)", fontSize: "1rem", gap: 12 }}>
+          <span style={{ animation: "pulse-glow 1.5s ease-in-out infinite" }}>âœ¦</span>
+          Loadingâ€¦
+        </div>
+      ) : children}
+    </AppContext.Provider>
+  );
+}
+
+export function useApp() {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error("useApp must be used within AppProvider");
+  return ctx;
+}
