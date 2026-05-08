@@ -7,7 +7,6 @@ export interface User {
   name: string;
   role: UserRole;
   email: string;
-  fixedForGroups?: string[]; // group names this joiner is auto-added to
 }
 
 // ─── Weight Categories (fully dynamic, managed by GOM) ───────────────────────
