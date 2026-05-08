@@ -30,10 +30,10 @@ async function main() {
   await prisma.notification.deleteMany();
 
   for (const u of MOCK_USERS)
-    await prisma.user.create({ data: u });
+    await prisma.user.create({ data: { id: u.id, name: u.name, role: u.role, email: u.email } });
 
   for (const g of MOCK_KNOWN_GROUPS)
-    await prisma.knownGroup.create({ data: { id: g.id, name: g.name, members: { create: g.members } } });
+    await prisma.knownGroup.create({ data: { id: g.id, name: g.name, fixedJoiners: JSON.stringify(g.fixedJoiners ?? []), members: { create: g.members } } });
 
   for (const w of MOCK_WEIGHT_CATEGORIES)
     await prisma.weightCategory.create({ data: w });
