@@ -232,8 +232,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateUser = useCallback(async (id: string, updates: Partial<User>) => {
-    const data = { id, name: updates.name, role: updates.role, email: updates.email };
-    setUsers((p) => p.map((x) => x.id === id ? { ...x, ...data } : x));
+    const data: User = { id, name: updates.name ?? "", role: updates.role ?? "joiner", email: updates.email ?? "" };
+    setUsers((p) => p.map((x) => x.id === id ? data : x));
     await put(`users/${id}`, data).catch(console.error);
   }, []);
 
