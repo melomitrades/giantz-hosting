@@ -189,6 +189,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ── CRUD factories ─────────────────────────────────────────────────────────
+  function serializeForApi(obj: Record<string, unknown>): Record<string, unknown> {
+    const jsonFields = ["pricingOptions", "joiners", "shopOrderIds", "joinerFees", "coveringLog", "versions", "memberSlots"];
+    const r = { ...obj };
+    for (const f of jsonFields) {
+      if (r[f] !== undefined && typeof r[f] !== "string") r[f] = JSON.stringify(r[f]);
+    }
+    return r;
+  }
+
   function makeCrud<T extends { id: string }>(
     endpoint: string,
     setter: React.Dispatch<React.SetStateAction<T[]>>
@@ -205,9 +214,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const update = async (id: string, updates: Partial<T>) => {
       setter((p) => p.map((x) => x.id === id ? { ...x, ...updates } : x));
+      // Get the full merged object and serialize JSON fields before sending
       setter((current) => {
         const full = current.find((x) => x.id === id);
-        if (full) put(`${endpoint}/${id}`, full).catch(console.error);
+        if (full) {
+          const payload = serializeForApi(full as unknown as Record<string, unknown>);
+          put(`${endpoint}/${id}`, payload).catch(console.error);
+        }
         return current;
       });
     };
